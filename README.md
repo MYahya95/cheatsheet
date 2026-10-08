@@ -1,6 +1,6 @@
 # Spark and Python interview cheat sheet
 
-Notes for a Kainos-style data engineering interview. Say the idea first, then write the code.
+Notes for a data engineering interview. Say the idea first, then write the code.
 
 The runnable version is `interview_cheatsheet.py`.
 
@@ -70,7 +70,7 @@ from pyspark.sql import SparkSession
 
 spark = (
     SparkSession.builder
-    .appName("kainos-cheatsheet")
+    .appName("cheatsheet")
     .master("local[1]")  # local[*] uses every core; [1] is enough for a sample
     .config("spark.sql.shuffle.partitions", "1")
     .getOrCreate()
@@ -308,7 +308,7 @@ def add_ok(item, bucket=None):
 
 # Password checker
 
-This is a common Kainos live-coding task. Talk, then type.
+This is a common live-coding task. Talk, then type.
 
 **Say this first**
 
