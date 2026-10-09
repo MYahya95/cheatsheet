@@ -91,6 +91,19 @@ finally:
 
 A laptop needs Java on `PATH` or `JAVA_HOME`. A Databricks cluster already has a session named `spark`.
 
+## `try` / `spark.range(3).show()`
+
+```python
+try:
+    spark.range(3).show()
+finally:
+    spark.stop()
+```
+
+`spark.range(3)` builds a one-column DataFrame called `id` with the rows `0`, `1`, and `2`. `show()` is the action that prints them. It is a smoke test: if this prints, the session started.
+
+`try` / `finally` means `spark.stop()` still runs when the body throws. `finally` is not an error handler. `except` is what catches the error.
+
 ---
 
 # Create a DataFrame, save it, read it
@@ -111,6 +124,39 @@ people.show(truncate=False)
 ```
 
 Passing the schema as a DDL string keeps types obvious. `inferSchema` on a big CSV scans the file. Prefer an explicit schema.
+
+## Schema from a list or a pandas Series
+
+Spark will not invent a trustworthy schema from a bare Python list or a pandas Series. Pass the schema yourself.
+
+From a list of tuples, the second argument is the schema. A DDL string or a `StructType` both work:
+
+```python
+from pyspark.sql.types import StructType, StructField, IntegerType, StringType
+
+rows = [(1, "Ada"), (2, "Grace")]
+
+df = spark.createDataFrame(rows, "id int, name string")
+
+schema = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("name", StringType(), True),
+])
+df = spark.createDataFrame(rows, schema)
+```
+
+The third `StructField` argument is nullable. `False` means the column is required.
+
+A pandas Series is one column. Turn it into a frame, then pass the schema. Without that, Spark infers the type from the values.
+
+```python
+import pandas as pd
+
+amount = pd.Series([10, 20, 30], name="amount")
+df = spark.createDataFrame(amount.to_frame(), schema="amount long")
+```
+
+A Series has no room for a second column. For `id` and `name`, start from a pandas DataFrame or from tuples, not from one Series.
 
 ---
 
@@ -368,3 +414,133 @@ def is_valid(password: str) -> bool:
 | Business key | The id you merge on. Not the file name, not the load timestamp |
 | SCD2 | Keep history: close the old row, insert the new one |
 | Temp view vs table | Temp view dies with the session. `saveAsTable` keeps a Delta table |
+
+---
+
+# More SQL questions
+
+## `UNION` or `UNION ALL`?
+
+`UNION` stacks rows and removes duplicates. `UNION ALL` stacks rows and keeps duplicates. `UNION ALL` is cheaper. Use it unless you actually need distinct rows.
+
+## Why does `WHERE col = NULL` return nothing?
+
+`NULL` means unknown. `unknown = unknown` is not true. Use `col IS NULL`. In Spark SQL, `col <=> NULL` is the null-safe equality.
+
+## `COUNT(*)` or `COUNT(col)`?
+
+`COUNT(*)` counts rows. `COUNT(col)` counts rows where `col` is not null. `COUNT(DISTINCT col)` counts different non-null values.
+
+## `INNER JOIN` or `LEFT JOIN`?
+
+`INNER` keeps only matching keys. `LEFT` keeps every row from the left table and fills the right side with null when there is no match.
+
+## `WHERE` or `HAVING`?
+
+`WHERE` filters raw rows, before grouping. `HAVING` filters groups, after `GROUP BY`.
+
+```sql
+SELECT dept, COUNT(*) AS n
+FROM people
+WHERE score >= 70
+GROUP BY dept
+HAVING COUNT(*) > 1
+```
+
+## What must appear in `GROUP BY`?
+
+Every selected column that is not inside an aggregate (`COUNT`, `SUM`, `MAX`, …).
+
+## `DELETE`, `TRUNCATE`, or `DROP`?
+
+| Statement | What remains |
+| --- | --- |
+| `DELETE` | The table. Some or all rows are gone. Can have a `WHERE` |
+| `TRUNCATE` | The table, with no rows |
+| `DROP` | Nothing. The table itself is gone |
+
+## `EXISTS` or `IN`?
+
+Both answer "is this key in that set?". `EXISTS` stops at the first match and handles nulls more safely. `NOT IN` with a null in the list can wipe out the whole result.
+
+## What is a CTE?
+
+A named subquery you can read from the top:
+
+```sql
+WITH high AS (
+  SELECT * FROM people WHERE score >= 90
+)
+SELECT dept, COUNT(*) FROM high GROUP BY dept
+```
+
+## What is a primary key?
+
+The column, or columns, that identify one row. It is unique and not null. An index is separate: it speeds up lookup. A primary key is a rule about the data.
+
+---
+
+# More Python questions
+
+## List or tuple?
+
+A list is mutable: you can append and change items. A tuple is immutable. A tuple can be a dict key. A list cannot.
+
+## `is` or `==`?
+
+`==` asks whether the values are equal. `is` asks whether they are the same object. Use `is` for `None`. Use `==` for numbers and strings.
+
+## Why can `""`, `[]`, `0`, and `None` all fail an `if`?
+
+They are falsy. Everything else is mostly truthy, including `"0"` and `[0]`.
+
+## `*args` and `**kwargs`?
+
+`*args` collects extra positional arguments into a tuple. `**kwargs` collects extra named arguments into a dict.
+
+```python
+def log(message, *args, **kwargs):
+    return message, args, kwargs
+```
+
+## `sort` or `sorted`?
+
+`names.sort()` changes the list and returns `None`. `sorted(names)` returns a new list and leaves the original alone.
+
+## Why `"".join(parts)` instead of `+=` in a loop?
+
+Each `+=` on a string builds a new string. `join` builds one string at the end.
+
+## Shallow copy or deep copy?
+
+A shallow copy shares the inner lists. A deep copy duplicates them.
+
+```python
+import copy
+inner = [[1]]
+shallow = copy.copy(inner)
+deep = copy.deepcopy(inner)
+```
+
+Changing `shallow[0]` also changes `inner[0]`. Changing `deep[0]` does not.
+
+## What does a decorator do?
+
+It wraps a function. `@cache` on `f` means `f = cache(f)`.
+
+## `Exception`, `else`, `finally`?
+
+`except` runs when that error is raised. `else` runs when the `try` did **not** raise. `finally` runs either way.
+
+## Why not use a list as a dict key or a set item?
+
+Dict keys and set items must be hashable and must not change. Lists and dicts can change, so they are unhashable. Tuples of immutable values are fine.
+
+## `range` or a list of indexes?
+
+```python
+for i, name in enumerate(names):
+    ...
+```
+
+`enumerate` gives the index and the value. You rarely need `range(len(names))`.
