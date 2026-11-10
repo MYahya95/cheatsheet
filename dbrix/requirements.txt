@@ -1,0 +1,2 @@
+# Local runs only. A Databricks cluster already has PySpark.
+pyspark>=3.5
